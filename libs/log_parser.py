@@ -4,6 +4,7 @@ import json
 import datetime
 import numpy as np
 
+from scipy.signal import medfilt
 from parse import parse
 from loguru import logger
 from pandas import DataFrame
@@ -134,6 +135,9 @@ class DualMagLog:
             else:
                 logger.info("Line: " + str(i) + ", could not find matching time: " + str(int(self.all_data[i,0]/1000000)))
 
+        # filter out spikes and single-line data errors
+        for j in [14,15,16]:
+            self.all_data[:,j] = medfilt(self.all_data[:,j],3)
 
         return self.all_data
 

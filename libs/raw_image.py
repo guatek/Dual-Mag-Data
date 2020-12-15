@@ -30,10 +30,10 @@ class RawImage:
     """Load, process and export raw bin files
     """
 
-    def __init__(self, filepath):
+    def __init__(self, filepath, output_path=None):
 
         self.filepath = filepath
-
+        self.output_path = output_path
         self.file_header_format = '<iiQiQQ'
         self.file_header_params = [
             'file_type',
@@ -61,6 +61,7 @@ class RawImage:
         self.file_header = None
         self.frame_headers = []
         self.frame_data = []
+        self.field_correction = None
 
         # actual image width and height with raw size and binning
         self.img_width = 0
@@ -101,14 +102,96 @@ class RawImage:
 
         return output
 
-    def export_as_tiff(self, output_path=None, debayer='BayerRG16'):
+    def correct_flat_field(self, data):
+        if self.field_correction is None:
+            logger.info("Estimating flat field correction from images")
+
+            data_array = None
+
+            for i in range(0, self.frames_in_file):
+            
+                header, raw_data = self.read_frame(i)
+
+                if data_array is None:
+                    data_array = np.zeros((data.shape[0],data.shape[1],self.frames_in_file))
+                
+                data_array[:,:,i] = raw_data
+
+            self.field_correction = np.median(data_array, 2)
+            self.field_correction[self.field_correction < 1] = 1
+            self.field_correction = self.field_correction.astype('float') / np.min(self.field_correction)
+
+            # remove color from the correction
+            h, w = self.field_correction.shape
+            self.field_correction = cv2.resize(self.field_correction, (int(w/2), int(h/2)), interpolation=cv2.INTER_AREA)
+            self.field_correction = cv2.resize(self.field_correction, (w, h), interpolation=cv2.INTER_LINEAR)
+        
+        # apply the correction
+        data = data / self.field_correction
+
+        if self.bpp == 2:
+            data = data.astype('uint16')
+        else:
+            data = data.astype('uint8')
+
+        return data
+            
+
+    
+    def export_8bit_jpegs(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2RGB, flat_field=True):
+        file_info = {}
+        file_info['file_header'] = self.file_header
+        file_info['frame_headers'] = []
+
+        for i in range(0, self.frames_in_file):
+            
+            header, data = self.read_frame(i)
+
+            if flat_field:
+                data = self.correct_flat_field(data)
+
+            if bayer_pattern:
+                logger.debug("Converting color...")
+                data = cv2.cvtColor(data,bayer_pattern) # RGB needed to get RGB format in opencv
+
+            # convert to 8-bits
+            result = np.float32(data)-np.min(data)
+            result[result<0.0] = 0.0
+            if np.max(data) != 0:
+                result = result/np.max(data)
+
+            data = np.uint8(255*result)
+
+            filename = os.path.basename(self.filepath)[:-4] + '-' + str(header['frame_id']) + '-' + str(header['system_timestamp']) +'.jpeg'
+
+            timestamp = int(header['system_timestamp']/1000000)
+            subdir = str(int(timestamp/864))
+
+            if output_path is None:
+                if self.output_path is None:
+                    output_subdir = os.path.join(os.path.dirname(self.filepath), subdir)
+                else:
+                    output_subdir = os.path.join(self.output_path, subdir)
+            else:
+                output_subdir = os.path.join(output_path, subdir)
+
+            if not os.path.exists(output_subdir):
+                os.makedirs(output_subdir)
+            jpeg_path = os.path.join(output_subdir, filename)
+            cv2.imwrite(jpeg_path, data)
+
+    def export_as_tiff(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2BGR, flat_field=True):
         file_info = {}
         file_info['file_header'] = self.file_header
         file_info['frame_headers'] = []
 
         if output_path is None:
-            tiff_path = self.filepath[:-4] + '.tif'
-            json_path = self.filepath[:-4] + '.json'
+            if self.output_path is None:
+                tiff_path = self.filepath[:-4] + '.tif'
+                json_path = self.filepath[:-4] + '.json'
+            else:
+                tiff_path = os.path.join(self.output_path, os.path.basename(self.filepath)[:-4] + '.tif')
+                json_path = os.path.join(self.output_path, os.path.basename(self.filepath)[:-4] + '.json')
         else:
             tiff_path = os.path.join(output_path, os.path.basename(self.filepath)[:-4]) + '.tif'
             json_path = os.path.join(output_path, os.path.basename(self.filepath)[:-4]) + '.json'
@@ -119,12 +202,19 @@ class RawImage:
         with TiffWriter(tiff_path, append=True) as tif:
 
             for i in range(0, self.frames_in_file):
+                
                 header, data = self.read_frame(i)
-                if debayer == 'BayerRG16':
+
+                if flat_field:
+                    data = self.correct_flat_field(data)
+
+                if bayer_pattern:
                     logger.debug("Converting color...")
-                    data = cv2.cvtColor(data,cv2.cv2.COLOR_BayerRG2BGR)
-                timestamp = float(header['system_timestamp']) / 1000000
-                dt = datetime.datetime.fromtimestamp(int(timestamp))
+                    data = cv2.cvtColor(data,bayer_pattern) # BGR needed to get RGB format in TiffWriter
+
+
+                timestamp = float(header['system_timestamp'])
+                dt = datetime.datetime.fromtimestamp(timestamp/1000000.0)
                 file_info['frame_headers'].append(header)
                 frame_header_string = json.dumps(header)
                 xtag = (65000, 's', 0, frame_header_string, False)
@@ -145,7 +235,7 @@ class RawImage:
             # read the rest of the header
             self.file_handle.seek(0)
             res = self.file_handle.read(self.file_header_length)
-            logger.info("Read file header of length: " + str(self.file_header_length))
+            logger.debug("Read file header of length: " + str(self.file_header_length))
             self.file_header = self.unpack(self.file_header_format, self.file_header_params, res)
 
             self.file_fmt = self.file_header['file_type']
@@ -153,7 +243,7 @@ class RawImage:
             self.img_width = int(self.file_header['image_width'])
             self.bpp = int(self.file_header['bits_per_pixel'] / 8) # in bytes-per-pixel from bits-per-pixel
 
-            logger.info(self.file_header)
+            logger.debug(self.file_header)
 
     def frame_size_in_bytes(self):
         
