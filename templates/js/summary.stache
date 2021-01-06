@@ -1,0 +1,9 @@
+// stache template generated
+var dual_mag_summary = [
+{{#summary_items}}
+    {
+        name: '{{name}}',
+        value: '{{value}}'
+    },
+{{/summary_items}}
+];

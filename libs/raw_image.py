@@ -5,7 +5,6 @@ import json
 import struct
 import datetime
 import numpy as np
-import pyqtgraph as pg
 from tifffile import TiffWriter
 from psutil import virtual_memory
 from loguru import logger
@@ -52,6 +51,11 @@ class RawImage:
             'system_timestamp',
         ]
 
+        # exports
+        self.tiff_exports = []
+        self.jpeg_exports = []
+        self.thumbnail_exports = []
+        self.image_items = []
 
         self.can_do_ram = False
 
@@ -62,6 +66,7 @@ class RawImage:
         self.frame_headers = []
         self.frame_data = []
         self.field_correction = None
+        self.background = None
 
         # actual image width and height with raw size and binning
         self.img_width = 0
@@ -125,9 +130,12 @@ class RawImage:
             h, w = self.field_correction.shape
             self.field_correction = cv2.resize(self.field_correction, (int(w/2), int(h/2)), interpolation=cv2.INTER_AREA)
             self.field_correction = cv2.resize(self.field_correction, (w, h), interpolation=cv2.INTER_LINEAR)
+            self.background = np.median(data_array, 2) / self.field_correction
         
         # apply the correction
         data = data / self.field_correction
+        data = data - self.background
+        data[data<0.0] = 0.0
 
         if self.bpp == 2:
             data = data.astype('uint16')
@@ -138,39 +146,52 @@ class RawImage:
             
 
     
-    def export_8bit_jpegs(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2RGB, flat_field=True):
+    def export_8bit_jpegs(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2RGB, flat_field=True, gamma=1.0, thumbnails=True):
         file_info = {}
         file_info['file_header'] = self.file_header
         file_info['frame_headers'] = []
 
+        self.jpeg_exports = []
+        self.thumbnail_exports = []
+
         for i in range(0, self.frames_in_file):
             
+            image_item = {}
+
             header, data = self.read_frame(i)
 
             if flat_field:
                 data = self.correct_flat_field(data)
-
+                
             if bayer_pattern:
                 logger.debug("Converting color...")
                 data = cv2.cvtColor(data,bayer_pattern) # RGB needed to get RGB format in opencv
 
-            # convert to 8-bits
-            result = np.float32(data)-np.min(data)
-            result[result<0.0] = 0.0
-            if np.max(data) != 0:
-                result = result/np.max(data)
+            # Clip any negative values
+            if self.bpp == 2:
+                data = data/256/256
+            else:
+                data = data/256
+            
+            data = data**(gamma)
+            data=data*255
+            data[data>255] = 255
+            data = np.uint8(data)
 
-            data = np.uint8(255*result)
 
             filename = os.path.basename(self.filepath)[:-4] + '-' + str(header['frame_id']) + '-' + str(header['system_timestamp']) +'.jpeg'
+            if thumbnails:
+                thumbnail_name = os.path.basename(self.filepath)[:-4] + '-' + str(header['frame_id']) + '-' + str(header['system_timestamp']) +'_thumb.jpeg'
 
             timestamp = int(header['system_timestamp']/1000000)
             subdir = str(int(timestamp/864))
 
             if output_path is None:
                 if self.output_path is None:
+                    output_path = os.path.dirname(self.filepath)
                     output_subdir = os.path.join(os.path.dirname(self.filepath), subdir)
                 else:
+                    output_path = self.output_path
                     output_subdir = os.path.join(self.output_path, subdir)
             else:
                 output_subdir = os.path.join(output_path, subdir)
@@ -178,12 +199,37 @@ class RawImage:
             if not os.path.exists(output_subdir):
                 os.makedirs(output_subdir)
             jpeg_path = os.path.join(output_subdir, filename)
+            self.jpeg_exports.append(jpeg_path)
             cv2.imwrite(jpeg_path, data)
+
+            image_item['src'] = os.path.basename(os.path.normpath(output_path)) + '/' + subdir + '/' + filename
+            image_item['fullWidth'] = data.shape[1]
+            image_item['fullHeight'] = data.shape[0]
+
+            timestamp = datetime.datetime.fromtimestamp(float(header['system_timestamp'])/1000000)
+            image_item['timestring'] = timestamp.isoformat()
+
+            if thumbnails:
+                thumbnail_size = (int(data.shape[1]/10), int(data.shape[0]/10))
+                jpeg_thumbnail_path = os.path.join(output_subdir, thumbnail_name)
+                cv2.imwrite(jpeg_thumbnail_path, cv2.resize(data, thumbnail_size, interpolation=cv2.INTER_LINEAR))
+                self.thumbnail_exports.append(jpeg_thumbnail_path)
+                image_item['thumbnailWidth'] = thumbnail_size[0]
+                image_item['thumbnailHeight'] = thumbnail_size[1]
+                image_item['thumbnail'] = os.path.basename(os.path.normpath(output_path)) + '/' + subdir + '/' + thumbnail_name
+            else:
+                image_item['thumbnailWidth'] = 0
+                image_item['thumbnailHeight'] = 0
+                image_item['thumbnail'] = ''
+
+            self.image_items.append(image_item)
 
     def export_as_tiff(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2BGR, flat_field=True):
         file_info = {}
         file_info['file_header'] = self.file_header
         file_info['frame_headers'] = []
+
+        self.tiff_exports = []
 
         if output_path is None:
             if self.output_path is None:
@@ -195,6 +241,8 @@ class RawImage:
         else:
             tiff_path = os.path.join(output_path, os.path.basename(self.filepath)[:-4]) + '.tif'
             json_path = os.path.join(output_path, os.path.basename(self.filepath)[:-4]) + '.json'
+
+        self.tiff_exports.append(tiff_path)
 
         logger.info("Exporting headers to " + json_path)
         logger.info("Exporting frames to " + tiff_path)

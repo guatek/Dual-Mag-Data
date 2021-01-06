@@ -4,6 +4,8 @@ import glob
 import time
 import shutil
 import tarfile
+import pystache
+import datetime
 import configparser
 from loguru import logger
 
@@ -17,12 +19,31 @@ roi_paths = ['low_mag_cam_rois','high_mag_cam_rois']
 video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
 
 def threaded_video_proc(raw_image):
-    raw_image.export_as_tiff()
-    raw_image.export_8bit_jpegs()
+    raw_image.export_as_tiff(flat_field=False)
+    raw_image.export_8bit_jpegs(thumbnails=True, flat_field=False, gamma=1.0)
+    return raw_image
     
 def threaded_roi_proc(roi):
     roi.process(save_to_disk=True)
+    return roi
 
+def render_template(template_name, context, webapp_output):
+
+    template = ""
+    with open(os.path.join('..','templates','js',template_name),"r") as fconv:
+        template = fconv.read()
+
+    # render the javascript page and save to disk
+    page = pystache.render(template,context)
+
+    if not os.path.exists(webapp_output):
+        os.makedirs(webapp_output)
+
+    with open(os.path.join(webapp_output,context['database_name']+'.js'),"w") as fconv:
+        fconv.write(page)
+
+def summary_item(name, value):
+    return {"name": name, "value": value}
 
 if __name__=="__main__":
 
@@ -30,6 +51,8 @@ if __name__=="__main__":
     logger.add(sys.stderr, level="INFO")
 
     with logger.catch():
+
+        start_time = time.time()
 
         if len(sys.argv) != 2:
             logger.fatal("Please enter data directory as the first argument")
@@ -64,18 +87,34 @@ if __name__=="__main__":
                 os.makedirs(output_dir)
             else:
                 shutil.rmtree(output_dir)
+                time.sleep(2)
                 os.makedirs(output_dir)
 
         except IOError as e:
             logger.error(e)
             exit(1)
 
-        # Process and export log file
+        # setup the webapp output
+        webapp_dir = 'webapp'
+
+        # copy over the base app 
+        shutil.copytree(os.path.abspath(os.path.join('..', webapp_dir)),os.path.join(output_dir,webapp_dir))
+
+        # # Process and export log file
         dml = DualMagLog(log_file)
         dml.parse_lines()
         dml.export(os.path.join(output_dir, os.path.basename(log_file)[:-4] + '.csv'))
 
-        # Process video files 
+        # start populating the summary array
+        summary_items = []
+        summary_items.append(summary_item("App Creation DateTime", datetime.datetime.now().isoformat()))
+        summary_items.append(summary_item("Data Collection DateTime", dml.log_start_time))
+
+        # set output to webapp dir for all remaing files
+        output_dir = os.path.join(output_dir,webapp_dir)
+
+        # # Process video files
+        total_vids = [] 
         for vid_path in video_paths:
             # create output path is needed
             output_path = os.path.join(output_dir, vid_path)
@@ -89,8 +128,26 @@ if __name__=="__main__":
             with ThreadPool(processes=6) as p:
                 result = p.map(threaded_video_proc, raw_videos)
 
+            # Create image-grid
+            video_frames = []
+            for r in raw_videos:
+                for item in r.image_items:
+                    video_frames.append(item)
+            
+            total_vids.append(len(video_frames))
+
+            # render the output for webapp
+            context = {}
+            context['image_items'] = video_frames
+            context['database_name'] = vid_path
+            render_template('image-grid.stache', context, output_dir)
+
         # Process ROIs
+        total_rois = []
         for roi_path in roi_paths:
+
+            all_rois = []
+
             # create output path is needed
             output_path = os.path.join(output_dir, roi_path)
             
@@ -98,21 +155,25 @@ if __name__=="__main__":
             if not os.path.exists(output_path):
                 os.makedirs(output_path)
             # loop over tars, untar and then process subdirs
-            archs = sorted(glob.glob(os.path.join(sys.argv[1], roi_path, '*.tar')))
+            subdirs = sorted(glob.glob(os.path.join(sys.argv[1], roi_path, '*')))
 
-            for arch in archs:
-                roi_per_sec_timer = time.time()
-                logger.info('Processing tar archive: ' + arch)
-                extracted_path = arch + ".unpacked"
-                if not os.path.exists(extracted_path):
-                    os.makedirs(extracted_path)
-                with tarfile.open(arch) as archive:
-                    for member in archive.getmembers():
-                        if member.isreg():  # skip if the TarInfo is not files
-                            member.name = os.path.basename(member.name) # remove the path by reset it
-                            archive.extract(member,extracted_path) # extract
+            for subdir in subdirs:
+                if subdir[-3:] == 'tar':
+                    roi_per_sec_timer = time.time()
+                    logger.info('Processing tar archive: ' + subdir)
+                    extracted_path = subdir + ".unpacked"
+                    if not os.path.exists(extracted_path):
+                        os.makedirs(extracted_path)
+                    with tarfile.open(subdir) as archive:
+                        for member in archive.getmembers():
+                            if member.isreg():  # skip if the TarInfo is not files
+                                member.name = os.path.basename(member.name) # remove the path by reset it
+                                archive.extract(member,extracted_path) # extract
 
-                rois = sorted(glob.glob(os.path.join(extracted_path, '*.tif')))
+                    rois = sorted(glob.glob(os.path.join(extracted_path, '*.tif')))
+                else:
+                    rois = sorted(glob.glob(os.path.join(subdir, '*.tif')))
+
                 raw_rois = []
                 for roi in rois:
                     roi_filename = os.path.basename(roi)
@@ -127,8 +188,48 @@ if __name__=="__main__":
                     raw_rois.append(ROI(roi_filepath, roi_filename, roi_output_dir, cfg=config))
 
                 with ThreadPool(processes=24) as p:
-                    result = p.map(threaded_roi_proc, raw_rois)
+                    results = p.map(threaded_roi_proc, raw_rois)
+
+                for roi in results:
+                    all_rois.append(roi.get_item())
 
                 # remove the extracted dir
-                shutil.rmtree(extracted_path)
+                if os.path.exists(extracted_path):
+                    shutil.rmtree(extracted_path)
+
                 logger.info('ROIs per second: ' + str(len(rois)/(time.time()-roi_per_sec_timer)))
+
+            # Save the total number of ROIs processed
+            total_rois.append(len(all_rois))
+
+            template = ""
+            with open(os.path.join('..','templates','js','image-grid.stache'),"r") as fconv:
+                template = fconv.read()
+
+            context = {}
+            context['image_items'] = all_rois
+            context['database_name'] = roi_path
+            render_template('image-grid.stache', context, output_dir)
+
+            # render the javascript page and save to disk
+            page = pystache.render(template,context)
+
+            webapp_output = os.path.join(output_dir, webapp_dir)
+            if not os.path.exists(webapp_output):
+                os.makedirs(webapp_output)
+
+            with open(os.path.join(webapp_output,roi_path+'.js'),"w") as fconv:
+                fconv.write(page)
+
+        # finalize the data summary
+        summary_items.append(summary_item("Total Low Mag ROIs", total_rois[0]))
+        summary_items.append(summary_item("Total Low Mag Saved Images", total_vids[0]))
+        summary_items.append(summary_item("Total High Mag ROIs", total_rois[1]))
+        summary_items.append(summary_item("Total High Mag Saved Images", total_vids[1]))
+        summary_items.append(summary_item("Data Processing Time (s)", time.time() - start_time))
+        summary_items.append(summary_item("Log file csv export path", os.path.join(output_dir, os.path.basename(log_file)[:-4] + '.csv')))
+
+        context = {}
+        context['database_name'] = 'dual_mag_summary'
+        context['summary_items'] = summary_items
+        render_template('summary.stache', context, output_dir)

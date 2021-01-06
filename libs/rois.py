@@ -2,6 +2,7 @@
 import os
 import cv2
 import numpy as np
+import datetime
 
 from math import pi
 from loguru import logger
@@ -135,7 +136,7 @@ def intensity_features(img, obj_mask):
 class ROI:
     """Region Of Interest handler for loading, converting and storing
     """
-    def __init__(self, filepath, filename, output_path=None, bayer_pattern=cv2.COLOR_BAYER_RG2RGB, is_flipped=False):
+    def __init__(self, filepath, filename, output_path=None, bayer_pattern=cv2.COLOR_BAYER_RG2RGB, is_flipped=False, cfg=None):
         """Instantiate an ROI object
 
         Args:
@@ -144,10 +145,15 @@ class ROI:
             output_path (string): absolute path to output directory
             bayer_pattern (cv2.COLOR_*, optional): Color convertion type. Defaults to cv2.COLOR_BAYER_RG2RGB.
             is_flipped (bool, optional): when true, flip the image up-down. Defaults to False.
+            cfg (configparser, optional): loaded configparser object or None
         """
         try:
             self.basepath = filepath
             self.filename = filename
+
+            self.timestamp = datetime.datetime.fromtimestamp(float(self.filename.split('-')[1])/1000000)
+            self.timestring = self.timestamp.isoformat()
+
             self.output_path = output_path
             self.is_flipped = is_flipped
             self.img = import_image(self.basepath, self.filename, bayer_pattern is not None, bayer_pattern)
@@ -155,11 +161,43 @@ class ROI:
                 self.img = np.flipud(self.img)
             self.img_8bit = convert_to_8bit(self.img)
             self.loaded = True
+            self.cfg = cfg
+            self.url = ''
+            self.features = {}
         except IOError as e:
             self.loaded = False
             logger.error(e)
 
-    def process(self, save_to_disk=False, abs_path='', file_prefix='', cfg=None):
+    def get_item(self):
+        """Returns a simplified representation of the ROI for web apps
+
+        Returns:
+            dict: roi item with fields
+        """
+
+        output = {}
+
+        if 'area' in self.features:
+            output['image_id'] = self.filename[:-4]
+            output['area'] = self.features['area']
+            output['maj_axis_len'] = self.features['major_axis_length']
+            output['min_axis_len'] = self.features['minor_axis_length']
+            output['aspect_ratio'] = self.features['aspect_ratio']
+            output['orientation'] = self.features['orientation']
+            output['clipped_fraction'] = self.features['clipped_fraction']
+            output['timestamp'] = self.filename.split('-')[1]
+            output['timestring'] = self.timestring
+            output['thumbnailWidth'] = self.img.shape[1]
+            output['thumbnailHeight'] = self.img.shape[0]
+            output['fullWidth'] = self.img.shape[1]
+            output['fullHeight'] = self.img.shape[0]
+            output['src'] = self.url + '.jpeg'
+            output['thumbnail'] = self.url + '.jpeg'
+        
+        return output
+
+
+    def process(self, save_to_disk=False, abs_path='', file_prefix=''):
         """Process roi and extract features
 
         Args:
@@ -172,21 +210,30 @@ class ROI:
             [dict]: all features and images
         """
 
+        # set the file path
+        if file_prefix == '':
+            file_prefix = self.filename[:-4]
+
         # set the output path
         if abs_path == '' and self.output_path is not None:
             abs_path = self.output_path
+        
+        # store the url
+        subdir = os.path.basename(os.path.normpath(abs_path))
+        basedir = os.path.basename(os.path.normpath(os.path.dirname(os.path.normpath(abs_path))))
+        self.url = basedir + '/' + subdir + '/' + file_prefix
 
         # get a reference to 8bit version of the image
         img = self.img_8bit
 
         # Pull out some settings from cfg if available
-        if cfg:
-            min_obj_area = cfg['rois'].getint("min_obj_area",100)
-            objs_per_roi = cfg['rois'].getint("objs_per_roi",1)
-            deconv = cfg['rois'].getboolean("deconv",False)
-            edge_thresh = cfg['rois'].getfloat("edge_threshold",2.5)
-            use_jpeg = cfg['rois'].getboolean("use_jpeg",False)
-            raw_color = cfg['rois'].getboolean("raw_color",False)
+        if self.cfg:
+            min_obj_area = self.cfg['rois'].getint("min_obj_area",100)
+            objs_per_roi = self.cfg['rois'].getint("objs_per_roi",1)
+            deconv = self.cfg['rois'].getboolean("deconv",False)
+            edge_thresh = self.cfg['rois'].getfloat("edge_threshold",2.5)
+            use_jpeg = self.cfg['rois'].getboolean("use_jpeg",False)
+            raw_color = self.cfg['rois'].getboolean("raw_color",False)
         else:
             min_obj_area = 100
             objs_per_roi = 1
@@ -315,6 +362,8 @@ class ROI:
             features['solidity'] = 0
             features['estimated_volume'] = 0
 
+            self.features = features
+
             return features
 
         stats_only_features = features
@@ -362,9 +411,6 @@ class ROI:
             try:
 
                 # convert and save images
-
-                if file_prefix == '':
-                    file_prefix = self.filename[:-4]
 
                 # Raw color (no background removal)
                 if use_jpeg:

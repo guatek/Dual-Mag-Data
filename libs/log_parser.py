@@ -32,6 +32,7 @@ class DualMagLog:
         self.lines = []
         self.data = np.array([])
         self.file_okay = False
+        self.log_start_time = ''
 
         try:
             with open(filepath,"r") as f:
@@ -64,6 +65,9 @@ class DualMagLog:
                     # extract time and date of entry
                     dtobj = datetime.datetime.strptime(parsed_line['date_time_string'], '%Y-%m-%d %H:%M:%S.%f')
                     line_timestamp = dtobj.timestamp()*1000000 # in microseconds since epoch
+                    if self.log_start_time == '':
+                        self.log_start_time = parsed_line['date_time_string']
+                        
                 except Exception as e:
                     print(e)
                     continue
