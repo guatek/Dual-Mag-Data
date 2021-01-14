@@ -157,9 +157,13 @@ if __name__=="__main__":
             # loop over tars, untar and then process subdirs
             subdirs = sorted(glob.glob(os.path.join(sys.argv[1], roi_path, '*')))
 
+            extracted_path = None
+
             for subdir in subdirs:
+            
+                roi_per_sec_timer = time.time()
+            
                 if subdir[-3:] == 'tar':
-                    roi_per_sec_timer = time.time()
                     logger.info('Processing tar archive: ' + subdir)
                     extracted_path = subdir + ".unpacked"
                     if not os.path.exists(extracted_path):
@@ -194,7 +198,7 @@ if __name__=="__main__":
                     all_rois.append(roi.get_item())
 
                 # remove the extracted dir
-                if os.path.exists(extracted_path):
+                if extracted_path is not None and os.path.exists(extracted_path):
                     shutil.rmtree(extracted_path)
 
                 logger.info('ROIs per second: ' + str(len(rois)/(time.time()-roi_per_sec_timer)))
