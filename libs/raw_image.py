@@ -77,9 +77,14 @@ class RawImage:
             self.file_handle = open(self.filepath, "rb")
             self.file_valid = True
             self.file_size = os.path.getsize(self.filepath)
+            self.file_valid = self.file_size > 0
         except FileNotFoundError as e:
             logger.error(e)
             self.file_valid = False
+
+        if not self.file_valid:
+            logger.error("Zero size file.")
+            return
 
         # read the file header and set image sizes accordingly
         self.read_file_header()
@@ -93,11 +98,15 @@ class RawImage:
 
     def unpack(self, format_string, names, raw_data):
 
+        output = {}
+
+        if not self.file_valid:
+            return
+
         try:
             logger.debug("Unpacking data in format: " + format_string)
             logger.debug("Expected header size in bytes: " + str(struct.calcsize(format_string)))
             data = struct.unpack(format_string, raw_data)
-            output = {}
 
             for ind, d in enumerate(data):
                 output[names[ind]] = d
@@ -108,6 +117,10 @@ class RawImage:
         return output
 
     def correct_flat_field(self, data):
+
+        if not self.file_valid:
+            return
+
         if self.field_correction is None:
             logger.info("Estimating flat field correction from images")
 
@@ -147,6 +160,10 @@ class RawImage:
 
     
     def export_8bit_jpegs(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2RGB, flat_field=True, gamma=1.0, thumbnails=True):
+        
+        if not self.file_valid:
+            return
+        
         file_info = {}
         file_info['file_header'] = self.file_header
         file_info['frame_headers'] = []
@@ -197,7 +214,12 @@ class RawImage:
                 output_subdir = os.path.join(output_path, subdir)
 
             if not os.path.exists(output_subdir):
-                os.makedirs(output_subdir)
+                try:
+                    os.makedirs(output_subdir)
+                except FileExistsError as e:
+                    logger.warning(e)
+                    pass
+
             jpeg_path = os.path.join(output_subdir, filename)
             self.jpeg_exports.append(jpeg_path)
             cv2.imwrite(jpeg_path, data)
@@ -225,6 +247,10 @@ class RawImage:
             self.image_items.append(image_item)
 
     def export_as_tiff(self, output_path=None, bayer_pattern=cv2.COLOR_BayerRG2BGR, flat_field=True):
+        
+        if not self.file_valid:
+            return
+
         file_info = {}
         file_info['file_header'] = self.file_header
         file_info['frame_headers'] = []
@@ -294,14 +320,23 @@ class RawImage:
             logger.debug(self.file_header)
 
     def frame_size_in_bytes(self):
-        
-        return self.frame_header_size + self.bpp * self.img_width * self.img_height
+
+        if self.file_valid:
+            return self.frame_header_size + self.bpp * self.img_width * self.img_height
+        else:
+            return 0
 
     def frame_pixels(self):
-
-        return self.img_width*self.img_height
+        
+        if self.file_valid:
+            return self.img_width*self.img_height
+        else:
+            return 0
 
     def read_frame(self, index):
+
+        if not self.file_valid:
+            return
 
         frame_offset = self.file_header_length + index * self.frame_size_in_bytes()
         frame_pixels = self.frame_pixels()

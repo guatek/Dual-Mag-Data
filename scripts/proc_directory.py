@@ -20,7 +20,7 @@ video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
 
 def threaded_video_proc(raw_image):
     raw_image.export_as_tiff(flat_field=False)
-    raw_image.export_8bit_jpegs(thumbnails=True, flat_field=False, gamma=1.0)
+    raw_image.export_8bit_jpegs(thumbnails=True, flat_field=False, gamma=0.5)
     return raw_image
     
 def threaded_roi_proc(roi):
@@ -124,7 +124,12 @@ if __name__=="__main__":
             vids = sorted(glob.glob(os.path.join(sys.argv[1], vid_path, '*.bin')))
             raw_videos = []
             for vid in vids:
-                raw_videos.append(RawImage(vid, output_path))
+                tmp = RawImage(vid, output_path)
+                if tmp.file_valid:
+                    raw_videos.append(tmp)
+                else:
+                    logger.warning("File: " + vid + " is bad, skipping.")
+
             with ThreadPool(processes=6) as p:
                 result = p.map(threaded_video_proc, raw_videos)
 
@@ -215,23 +220,13 @@ if __name__=="__main__":
             context['database_name'] = roi_path
             render_template('image-grid.stache', context, output_dir)
 
-            # render the javascript page and save to disk
-            page = pystache.render(template,context)
-
-            webapp_output = os.path.join(output_dir, webapp_dir)
-            if not os.path.exists(webapp_output):
-                os.makedirs(webapp_output)
-
-            with open(os.path.join(webapp_output,roi_path+'.js'),"w") as fconv:
-                fconv.write(page)
-
         # finalize the data summary
         summary_items.append(summary_item("Total Low Mag ROIs", total_rois[0]))
         summary_items.append(summary_item("Total Low Mag Saved Images", total_vids[0]))
         summary_items.append(summary_item("Total High Mag ROIs", total_rois[1]))
         summary_items.append(summary_item("Total High Mag Saved Images", total_vids[1]))
         summary_items.append(summary_item("Data Processing Time (s)", time.time() - start_time))
-        summary_items.append(summary_item("Log file csv export path", os.path.join(output_dir, os.path.basename(log_file)[:-4] + '.csv')))
+        summary_items.append(summary_item("Log file csv export path", os.path.join(output_dir, os.path.basename(log_file)[:-4] + '.csv').replace("\\","/")))
 
         context = {}
         context['database_name'] = 'dual_mag_summary'
