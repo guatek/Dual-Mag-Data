@@ -26,3 +26,6 @@ if ($dirName) {
 else {
     echo "No directory selected, done"
 }
+
+# Pause waiting for user input
+Read-Host -Prompt "Press Enter to exit"
