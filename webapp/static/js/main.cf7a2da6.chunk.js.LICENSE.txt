@@ -19,10 +19,10 @@
 /*!
 
 =========================================================
-* Dual-Mag-Dash v1.0 Pager.js
+* Dual-Mag-Dash v1.0 ColSelect.js
 =========================================================
 
-* Split a total numer of items into a set and render page buttons
+* Select List in reactstrap Col
 
 * Copyright 2020 Guatek
 * Licensed under MIT (See LICENCE.md for details)
@@ -34,10 +34,41 @@
 /*!
 
 =========================================================
-* Dual-Mag-Dash v1.0 ROIGrid.js
+* Dual-Mag-Dash v1.0 ImageGrid.js
 =========================================================
 
-* Render a grid of ROIs with detail view
+* Render a grid of ROIs or full images with detail view
+
+* Copyright 2020 Guatek
+* Licensed under MIT (See LICENCE.md for details)
+
+=========================================================
+
+*/
+
+/*!
+
+=========================================================
+* Dual-Mag-Dash v1.0 ImageViewer.js
+=========================================================
+
+* Build a card with image thumbnails and controls for 
+* page size, sort method, contrast and brightness
+
+* Copyright 2020 Guatek
+* Licensed under MIT (See LICENCE.md for details)
+
+=========================================================
+
+*/
+
+/*!
+
+=========================================================
+* Dual-Mag-Dash v1.0 Pager.js
+=========================================================
+
+* Split a total numer of items into a set and render page buttons
 
 * Copyright 2020 Guatek
 * Licensed under MIT (See LICENCE.md for details)
