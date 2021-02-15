@@ -1,7 +1,7 @@
 # powershell script to open a directory dialog and select a data directory to process
-# with the proc_directory.py srcipt
+# with the proc_directory.py script
 
-# Activate the dual-mag python entironoment
+# Activate the dual-mag python environment
 conda activate dual-mag
 
 # Change to the script directory. EDIT THIS PATH to point to your script directory
@@ -20,7 +20,11 @@ $dirName = Get-DirName
 
 # run the script if we received a directory
 if ($dirName) { 
-    python proc_directory.py $dirName
+    Get-ChildItem $dirName | 
+    Foreach-Object {
+        echo "Running proc_directory on " $_.FullName
+        python proc_directory.py $_.FullName
+    }
     echo "Done."
 }
 else {

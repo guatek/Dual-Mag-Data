@@ -65,12 +65,10 @@ if __name__=="__main__":
         dl = os.listdir(sys.argv[1])
         for roi_path in roi_paths:
             if not roi_path in dl:
-                logger.error("Could not find: " + roi_path)
-                exit(1)
+                logger.warning("Could not find: " + roi_path)
         for video_path in video_paths:
             if not video_path in dl:
-                logger.error("Could not find: " + video_path)
-                exit(1)
+                logger.warning("Could not find: " + video_path)
         
         log_file = glob.glob(os.path.join(sys.argv[1], '*.log'))
         if len(log_file) != 1:
@@ -116,6 +114,10 @@ if __name__=="__main__":
         # # Process video files
         total_vids = [] 
         for vid_path in video_paths:
+
+            if not os.path.exists(os.path.join(sys.argv[1], vid_path)):
+                continue
+
             # create output path is needed
             output_path = os.path.join(output_dir, vid_path)
             logger.info(output_path)
@@ -150,6 +152,9 @@ if __name__=="__main__":
         # Process ROIs
         total_rois = []
         for roi_path in roi_paths:
+
+            if not os.path.exists(os.path.join(sys.argv[1], roi_path)):
+                continue
 
             all_rois = []
 
@@ -221,10 +226,12 @@ if __name__=="__main__":
             render_template('image-grid.stache', context, output_dir)
 
         # finalize the data summary
-        summary_items.append(summary_item("Total Low Mag ROIs", total_rois[0]))
-        summary_items.append(summary_item("Total Low Mag Saved Images", total_vids[0]))
-        summary_items.append(summary_item("Total High Mag ROIs", total_rois[1]))
-        summary_items.append(summary_item("Total High Mag Saved Images", total_vids[1]))
+        names = ['Low Mag', 'High Mag']
+        for i in range(0,len(total_rois)):
+            summary_items.append(summary_item("Total " + names[i] + " ROIs", total_rois[i]))
+        for i in range(0,len(total_vids)):
+            summary_items.append(summary_item("Total " + names[i] + " Saved Images", total_vids[i]))
+
         summary_items.append(summary_item("Data Processing Time (s)", time.time() - start_time))
         summary_items.append(summary_item("Log file csv export path", os.path.join(output_dir, os.path.basename(log_file)[:-4] + '.csv').replace("\\","/")))
 
