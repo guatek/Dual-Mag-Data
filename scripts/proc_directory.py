@@ -216,14 +216,10 @@ if __name__=="__main__":
             # Save the total number of ROIs processed
             total_rois.append(len(all_rois))
 
-            template = ""
-            with open(os.path.join('..','templates','js','image-grid.stache'),"r") as fconv:
-                template = fconv.read()
-
             context = {}
             context['image_items'] = all_rois
             context['database_name'] = roi_path
-            render_template('image-grid.stache', context, output_dir)
+            render_template('roi-grid.stache', context, output_dir)
 
         # finalize the data summary
         names = ['Low Mag', 'High Mag']

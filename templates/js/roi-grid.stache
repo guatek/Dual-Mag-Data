@@ -1,0 +1,17 @@
+// stache template generated
+var {{database_name}} = [
+{{#image_items}}
+    {
+        thumbnailWidth: {{thumbnailWidth}},
+        thumbnailHeight: {{thumbnailHeight}},
+        fullWidth: {{fullWidth}},
+        fullHeight: {{fullHeight}},
+        area: {{area}},
+        aspectRatio: {{aspect_ratio}},
+        majorAxisLength: {{maj_axis_len}},
+        src: '{{src}}',
+        thumbnail: '{{thumbnail}}',
+        caption: '{{timestring}}',
+    },    
+{{/image_items}}
+];
