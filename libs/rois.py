@@ -7,7 +7,7 @@ import datetime
 from math import pi
 from loguru import logger
 from scipy import ndimage, spatial
-from skimage import transform
+from skimage import transform, color
 from skimage import morphology, measure, exposure, restoration
 from skimage.feature import register_translation
 from skimage.filters import threshold_otsu, scharr, gaussian
@@ -71,7 +71,7 @@ def import_image(abs_path, filename, raw=True, bayer_pattern=cv2.COLOR_BAYER_RG2
         ndarray: the resulting image
     """
     img_c = cv2.imread(os.path.join(abs_path,filename),cv2.IMREAD_UNCHANGED)
-    if raw:
+    if raw and img_c is not None:
         img_c = cv2.cvtColor(img_c,bayer_pattern)
 
     return img_c
@@ -157,10 +157,14 @@ class ROI:
             self.output_path = output_path
             self.is_flipped = is_flipped
             self.img = import_image(self.basepath, self.filename, bayer_pattern is not None, bayer_pattern)
-            if self.is_flipped:
-                self.img = np.flipud(self.img)
-            self.img_8bit = convert_to_8bit(self.img)
-            self.loaded = True
+            if self.img is not None:
+                if self.is_flipped:
+                    self.img = np.flipud(self.img)
+                self.img_8bit = convert_to_8bit(self.img)
+                self.loaded = True
+            else:
+                self.loaded = False
+                logger.warning('Could not load: ' + filename)
             self.cfg = cfg
             self.url = ''
             self.features = {}
@@ -174,6 +178,9 @@ class ROI:
         Returns:
             dict: roi item with fields
         """
+
+        if not self.loaded:
+            return {}
 
         output = {}
 
@@ -197,6 +204,43 @@ class ROI:
         return output
 
 
+
+    def save_to_disk(self): 
+
+        if not self.loaded or self.features == {}:
+            return
+
+        if 'image' not in self.features:
+            return
+
+        if self.cfg:
+            raw_color = self.cfg['rois'].getboolean("raw_color",False)
+            use_jpeg = self.cfg['rois'].getboolean("use_jpeg",False)
+        else:
+            raw_color = True
+            use_jpeg = False
+        try:
+
+            # convert and save images
+
+            # Raw color (no background removal)
+            if use_jpeg:
+                if raw_color:
+                    cv2.imwrite(os.path.join(self.abs_path,self.file_prefix+"_rawcolor.jpeg"),self.features['rawcolor'])
+                # Save the processed image and binary mask
+                cv2.imwrite(os.path.join(self.abs_path,self.file_prefix+".jpeg"),self.features['image'])
+            else:
+                if raw_color:
+                    cv2.imwrite(os.path.join(self.abs_path,self.file_prefix+"_rawcolor.png"),self.features['rawcolor'])
+                # Save the processed image and binary mask
+                cv2.imwrite(os.path.join(self.abs_path,self.file_prefix+".png"),self.features['image'])
+
+            # Binary should also be saved png
+            cv2.imwrite(os.path.join(self.abs_path,self.file_prefix+"_binary.png"),self.features['binary'])
+
+        except IOError as e:
+            logger.error(e)
+
     def process(self, save_to_disk=False, abs_path='', file_prefix=''):
         """Process roi and extract features
 
@@ -210,6 +254,9 @@ class ROI:
             [dict]: all features and images
         """
 
+        if not self.loaded:
+            return None
+
         # set the file path
         if file_prefix == '':
             file_prefix = self.filename[:-4]
@@ -217,6 +264,10 @@ class ROI:
         # set the output path
         if abs_path == '' and self.output_path is not None:
             abs_path = self.output_path
+
+        # Store the paths so they can be used later for saving images
+        self.file_prefix = file_prefix
+        self.abs_path = abs_path
         
         # store the url
         subdir = os.path.basename(os.path.normpath(abs_path))
@@ -230,14 +281,20 @@ class ROI:
         if self.cfg:
             min_obj_area = self.cfg['rois'].getint("min_obj_area",100)
             objs_per_roi = self.cfg['rois'].getint("objs_per_roi",1)
-            deconv = self.cfg['rois'].getboolean("deconv",False)
+            deconv = self.cfg['rois'].get("deconv",'none')
+            deconv_mask_weight = self.cfg['rois'].getfloat('deconv_mask_weight',0.6)
+            deconv_iter = self.cfg['rois'].getint('deconv_iter',7)
             edge_thresh = self.cfg['rois'].getfloat("edge_threshold",2.5)
             use_jpeg = self.cfg['rois'].getboolean("use_jpeg",False)
             raw_color = self.cfg['rois'].getboolean("raw_color",False)
+            int_features = self.cfg['rois'].getboolean("intensity_features",False)
         else:
             min_obj_area = 100
             objs_per_roi = 1
-            deconv = False
+            deconv = 'none'
+            deconv_mask_weight = 0.6
+            deconv_iter = 7
+            int_features = False
             use_jpeg = False
             raw_color = True
             edge_thresh = 2.5
@@ -311,17 +368,18 @@ class ROI:
             avg_solidity = props[0].solidity
 
             # Calculate intensity features only for largest
-            features_intensity = intensity_features(gray, bw_img)
-            features['intensity_gray'] = features_intensity
+            if int_features:
+                features_intensity = intensity_features(gray, bw_img)
+                features['intensity_gray'] = features_intensity
 
-            features_intensity = intensity_features(img[::, ::, 0], bw_img)
-            features['intensity_red'] = features_intensity
+                features_intensity = intensity_features(img[::, ::, 0], bw_img)
+                features['intensity_red'] = features_intensity
 
-            features_intensity = intensity_features(img[::, ::, 1], bw_img)
-            features['intensity_green'] = features_intensity
+                features_intensity = intensity_features(img[::, ::, 1], bw_img)
+                features['intensity_green'] = features_intensity
 
-            features_intensity = intensity_features(img[::, ::, 2], bw_img)
-            features['intensity_blue'] = features_intensity
+                features_intensity = intensity_features(img[::, ::, 2], bw_img)
+                features['intensity_blue'] = features_intensity
 
             # Check for clipped image
             if np.max(bw_img_all) == 0:
@@ -377,60 +435,77 @@ class ROI:
         img[:,:,1] = img[:,:,1]*blurd_bw_img
         img[:,:,2] = img[:,:,2]*blurd_bw_img
 
-        # Make a guess of the PSF for sharpening
-        psf = make_gaussian(5, 3, center=None)
-
         # renormalize
         if np.max(img) == 0:
             img = np.float32(img)
         else:
             img = np.float32(img)/np.max(img)
 
-        # sharpen each color channel and then reconbine
-        if deconv:
+        
+        if deconv.lower() == 'um' or deconv.lower() == 'lr':
 
-            img[img == 0] = 0.0001
-            img[:,:,0] = restoration.richardson_lucy(img[:,:,0], psf, 7)
-            img[:,:,1] = restoration.richardson_lucy(img[:,:,1], psf, 7)
-            img[:,:,2] = restoration.richardson_lucy(img[:,:,2], psf, 7)
+            # Get the intesity image in HSV space
+            hsv_img = color.rgb2hsv(img)
+            v_img = hsv_img[:,:,2]
 
-        # Rescale image to uint8 0-255
-        img[img < 0] = 0
+            # mask the raw image with smoothed foreground mask
+            blurd_bw_img = gaussian(bw_img_all,3)
+            v_img = v_img*blurd_bw_img
 
-        if np.max(img) == 0:
-            img = np.uint8(255*img)
-        else:
-            img = np.uint8(255*img/np.max(img))
+            if deconv.lower() == 'um':
 
+                old_mean = np.mean(v_img)
+                blurd = gaussian(v_img,1.0)
+                hpfilt = v_img - blurd*deconv_mask_weight
+                v_img = hpfilt/(1-deconv_mask_weight)
+
+                new_mean = np.mean(v_img)
+
+                if (new_mean) != 0:
+                    v_img = v_img*old_mean/new_mean
+
+
+                v_img[v_img > 1] = 1
+                v_img = np.uint8(255*v_img)
+
+            if deconv.lower() == 'lr':
+
+                # Make a guess of the PSF for sharpening
+                psf = make_gaussian(5, 3, center=None)
+
+                v_img[v_img == 0] = 0.0001
+
+                v_img = restoration.richardson_lucy(v_img, psf, deconv_iter)
+
+                v_img[v_img < 0] = 0
+
+                if np.max(v_img) == 0:
+                    v_img = np.uint8(255*v_img)
+                else:
+                    v_img = np.uint8(255*v_img/np.max(v_img))
+
+
+            # restore the rbg image from hsv
+            hsv_img[:,:,2] = v_img
+            img = color.hsv2rgb(hsv_img)
+
+            # Rescale image to uint8 0-255
+            img[img < 0] = 0
+
+            if np.max(img) == 0:
+                img = np.uint8(255*img)
+            else:
+                img = np.uint8(255*img/np.max(img))
+
+        
         features['image'] = img
         features['binary'] = 255*bw_img_all
 
+        self.features = features
+
         # Save the binary image and also color image if requested
         if save_to_disk:
-
-            try:
-
-                # convert and save images
-
-                # Raw color (no background removal)
-                if use_jpeg:
-                    if raw_color:
-                        cv2.imwrite(os.path.join(abs_path,file_prefix+"_rawcolor.jpeg"),features['rawcolor'])
-                    # Save the processed image and binary mask
-                    cv2.imwrite(os.path.join(abs_path,file_prefix+".jpeg"),features['image'])
-                else:
-                    if raw_color:
-                        cv2.imwrite(os.path.join(abs_path,file_prefix+"_rawcolor.png"),features['rawcolor'])
-                    # Save the processed image and binary mask
-                    cv2.imwrite(os.path.join(abs_path,file_prefix+".png"),features['image'])
-
-                # Binary should also be saved png
-                cv2.imwrite(os.path.join(abs_path,file_prefix+"_binary.png"),features['binary'])
-
-            except IOError as e:
-                logger.error(e)
-
-        self.features = features
+            self.save_to_disk()
 
         return features
 
