@@ -179,12 +179,14 @@ class ROI:
             dict: roi item with fields
         """
 
-        if not self.loaded:
-            return {}
-
         output = {}
 
+        if not self.loaded:
+            output['image_valid'] = False
+            return None
+
         if 'area' in self.features:
+            output['image_valid'] = True
             output['image_id'] = self.filename[:-4]
             output['area'] = self.features['area']
             output['maj_axis_len'] = self.features['major_axis_length']
@@ -492,10 +494,10 @@ class ROI:
             # Rescale image to uint8 0-255
             img[img < 0] = 0
 
-            if np.max(img) == 0:
-                img = np.uint8(255*img)
-            else:
-                img = np.uint8(255*img/np.max(img))
+        if np.max(img) == 0:
+            img = np.uint8(255*img)
+        else:
+            img = np.uint8(255*img/np.max(img))
 
         
         features['image'] = img

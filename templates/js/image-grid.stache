@@ -9,6 +9,6 @@ var {{database_name}} = [
         src: '{{src}}',
         thumbnail: '{{thumbnail}}',
         caption: '{{timestring}}',
-    },    
+    }, 
 {{/image_items}}
 ];

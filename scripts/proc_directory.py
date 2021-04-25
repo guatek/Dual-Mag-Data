@@ -75,7 +75,9 @@ def threaded_subdir_proc(subdir_pack):
         if not os.path.exists(roi_output_dir):
             os.makedirs(roi_output_dir)
 
-        raw_rois.append(ROI(roi_filepath, roi_filename, roi_output_dir, cfg=config))
+        tmp = ROI(roi_filepath, roi_filename, roi_output_dir, cfg=config)
+        if tmp.loaded:
+            raw_rois.append(tmp)
 
     all_rois = []
     
