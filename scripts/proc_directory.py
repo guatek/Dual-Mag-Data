@@ -49,6 +49,7 @@ def threaded_subdir_proc(subdir_pack):
     subdir = subdir_pack['subdir']
     output_path = subdir_pack['output_path']
     config = subdir_pack['config']
+    frame_increment = subdir_pack['frame_increment']
 
     if subdir[-3:] == 'tar':
         extracted_path = subdir + ".unpacked"
@@ -65,19 +66,27 @@ def threaded_subdir_proc(subdir_pack):
         rois = sorted(glob.glob(os.path.join(subdir, '*.tif')))
 
     raw_rois = []
+    frame_counter = 0
+    last_proc_frame = 0
     for roi in rois:
         roi_filename = os.path.basename(roi)
         roi_filepath = os.path.dirname(roi)
 
-        # create output dir if needed
-        roi_timestamp = str(int(int(roi_filename.split('-')[1])/1000000/120))
-        roi_output_dir = os.path.join(output_path, roi_timestamp)
-        if not os.path.exists(roi_output_dir):
-            os.makedirs(roi_output_dir)
+        # Get frame number from filename
+        frame_number = int(roi_filename.split('-')[3])
 
-        tmp = ROI(roi_filepath, roi_filename, roi_output_dir, cfg=config)
-        if tmp.loaded:
-            raw_rois.append(tmp)
+        # process roi if the frame number increment is okay
+        if last_proc_frame == 0 or frame_number - last_proc_frame >= frame_increment:
+            last_proc_frame = frame_number
+            # create output dir if needed
+            roi_timestamp = str(int(int(roi_filename.split('-')[1])/1000000/120))
+            roi_output_dir = os.path.join(output_path, roi_timestamp)
+            if not os.path.exists(roi_output_dir):
+                os.makedirs(roi_output_dir)
+
+            tmp = ROI(roi_filepath, roi_filename, roi_output_dir, cfg=config)
+            if tmp.loaded:
+                raw_rois.append(tmp)
 
     all_rois = []
     
@@ -127,7 +136,7 @@ if __name__=="__main__":
 
         start_time = time.time()
 
-        tar_increment = [1,1]
+        frame_increment = [1,1]
 
         if len(sys.argv) < 2:
             logger.exception("Please enter data directory as the first argument")
@@ -135,12 +144,12 @@ if __name__=="__main__":
 
         if len(sys.argv) == 4:
             try:
-                tar_increment[0] = int(sys.argv[2])
-                tar_increment[1] = int(sys.argv[3])
-                logger.info('Will process every ' + str(tar_increment[0]) + ' low_mag tar archive')
-                logger.info('Will process every ' + str(tar_increment[1]) + ' high_mag tar archive')
+                frame_increment[0] = int(sys.argv[2])
+                frame_increment[1] = int(sys.argv[3])
+                logger.info('Will process every ' + str(frame_increment[0]) + ' low_mag frame')
+                logger.info('Will process every ' + str(frame_increment[1]) + ' high_mag frame')
             except:
-                logger.exception('Could not parse tar increments, please enter for example: 10 10 to process every 10th archive')
+                logger.exception('Could not parse tar increments, please enter for example: 10 10 to process every 10th frame')
                 exit(1)
 
         # Load config file
@@ -256,7 +265,8 @@ if __name__=="__main__":
             subdirs = sorted(glob.glob(os.path.join(sys.argv[1], roi_path, '*')))
 
             # select only a subset with tar_increment
-            subdirs = subdirs[0::tar_increment[index]]
+            # This is now handled at the frame level
+            #subdirs = subdirs[0::tar_increment[index]]
 
             subdir_packs = []
             #bundle_queue = Queue()
@@ -265,6 +275,7 @@ if __name__=="__main__":
                 subdir_pack['subdir'] = subdir
                 subdir_pack['output_path'] = output_path
                 subdir_pack['config'] = config
+                subdir_pack['frame_increment'] = frame_increment[index]
                 #bundle_queue.put(subdir_pack)
                 subdir_packs.append(subdir_pack)
 
