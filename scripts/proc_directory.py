@@ -76,7 +76,7 @@ def threaded_subdir_proc(subdir_pack):
         frame_number = int(roi_filename.split('-')[3])
 
         # process roi if the frame number increment is okay
-        if last_proc_frame == 0 or frame_number - last_proc_frame >= frame_increment:
+        if last_proc_frame == 0 or frame_number == last_proc_frame or (frame_number - last_proc_frame >= frame_increment):
             last_proc_frame = frame_number
             # create output dir if needed
             roi_timestamp = str(int(int(roi_filename.split('-')[1])/1000000/120))
