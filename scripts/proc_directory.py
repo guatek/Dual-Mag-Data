@@ -14,9 +14,12 @@ from loguru import logger
 sys.path.append('..')
 from libs.raw_image import RawImage
 from libs.log_parser import DualMagLog
+import multiprocessing
 from multiprocessing.pool import ThreadPool, Pool
 from multiprocessing import Process, Queue, cpu_count
 from libs.rois import ROI
+
+from concurrent import futures
 
 roi_paths = ['low_mag_cam_rois','high_mag_cam_rois']
 video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
@@ -228,8 +231,11 @@ if __name__=="__main__":
                 else:
                     logger.warning("File: " + vid + " is bad, skipping.")
 
-            with Pool(processes=6) as p:
-                result = p.map(threaded_video_proc, raw_videos)
+            with futures.ThreadPoolExecutor(6) as executor:
+                result = executor.map(threaded_video_proc, raw_videos)
+            
+            #with Pool(processes=6) as p:
+            #    result = p.map(threaded_video_proc, raw_videos)
 
             # Create image-grid
             video_frames = []
@@ -313,6 +319,9 @@ if __name__=="__main__":
             #     # Terminate the processes in case they are stuck
             # for p in processes:
             #     p.terminate()
+
+            #with futures.ThreadPoolExecutor(n_threads) as executor:
+            #    all_subdirs = executor.map(threaded_subdir_proc, subdir_packs)
 
             with Pool(processes=n_threads) as p:
                 all_subdirs = p.map(threaded_subdir_proc, subdir_packs)

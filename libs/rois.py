@@ -7,10 +7,9 @@ import datetime
 from math import pi
 from loguru import logger
 from scipy import ndimage, spatial
-from skimage import transform, color
-from skimage import morphology, measure, exposure, restoration
-from skimage.feature import register_translation
-from skimage.filters import threshold_otsu, scharr, gaussian
+from skimage import color
+from skimage import morphology, measure, restoration
+from skimage.filters import scharr, gaussian
 
 __author__ = "Paul Roberts"
 __copyright__ = "Copyright 2020 Guatek"
