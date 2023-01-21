@@ -131,6 +131,25 @@ def intensity_features(img, obj_mask):
 
     return res
 
+def bb_intersection_over_union(roiA, roiB):
+	# determine the (x, y)-coordinates of the intersection rectangle
+	xA = max(roiA.left, roiB.left)
+	yA = max(roiA.top, roiB.top)
+	xB = min(roiA.left+roiA.width, roiB.left+roiB.width)
+	yB = min(roiA.top+roiA.height, roiB.top+roiB.height)
+	# compute the area of intersection rectangle
+	interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+	# compute the area of both the prediction and ground-truth
+	# rectangles
+	boxAArea = roiA.width * roiA.height
+	boxBArea = roiB.width * roiB.height
+	# compute the intersection over union by taking the intersection
+	# area and dividing it by the sum of prediction + ground-truth
+	# areas - the interesection area
+	iou = interArea / float(boxAArea + boxBArea - interArea)
+	# return the intersection over union value
+	return iou
+
 
 class ROI:
     """Region Of Interest handler for loading, converting and storing
@@ -152,6 +171,12 @@ class ROI:
 
             self.timestamp = datetime.datetime.fromtimestamp(float(self.filename.split('-')[1])/1000000)
             self.timestring = self.timestamp.isoformat()
+            # high_mag_cam-1649701840911317-21594687728-3-023-498-914-452-44_binary
+            self.frame_number = int(self.filename.split('-')[3])
+            self.left = int(self.filename.split('-')[5])
+            self.top = int(self.filename.split('-')[6])
+            self.width = int(self.filename.split('-')[7])
+            self.height = int(self.filename.split('-')[8])
 
             self.output_path = output_path
             self.is_flipped = is_flipped
@@ -204,7 +229,14 @@ class ROI:
         
         return output
 
+    def is_duplicate(self, test_roi):
+        if bb_intersection_over_union(self, test_roi) > 0.2:
+            return True
+        else:
+            return False
 
+    def get_area(self):
+        return self.width * self.height
 
     def save_to_disk(self): 
 
@@ -241,6 +273,36 @@ class ROI:
 
         except IOError as e:
             logger.error(e)
+
+    def delete_from_disk(self):
+        if self.cfg:
+            raw_color = self.cfg['rois'].getboolean("raw_color",False)
+            use_jpeg = self.cfg['rois'].getboolean("use_jpeg",False)
+        else:
+            raw_color = True
+            use_jpeg = False
+        try:
+
+            # convert and save images
+
+            # Raw color (no background removal)
+            if use_jpeg:
+                if raw_color:
+                    os.remove(os.path.join(self.abs_path,self.file_prefix+"_rawcolor.jpeg"))
+                # Save the processed image and binary mask
+                os.remove(os.path.join(self.abs_path,self.file_prefix+".jpeg"))
+            else:
+                if raw_color:
+                    os.remove(os.path.join(self.abs_path,self.file_prefix+"_rawcolor.png"))
+                # Save the processed image and binary mask
+                os.remove(os.path.join(self.abs_path,self.file_prefix+".png"))
+
+            # Binary should also be saved png
+            os.remove(os.path.join(self.abs_path,self.file_prefix+"_binary.png"))
+        
+        except IOError as e:
+            logger.error(e)
+
 
     def process(self, save_to_disk=False, abs_path='', file_prefix=''):
         """Process roi and extract features

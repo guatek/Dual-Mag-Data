@@ -5,21 +5,21 @@ import time
 import shutil
 import tarfile
 import cProfile
-import pystache
 import datetime
-import numpy as np
 import configparser
-from loguru import logger
-
-sys.path.append('..')
-from libs.raw_image import RawImage
-from libs.log_parser import DualMagLog
+from concurrent import futures
 import multiprocessing
 from multiprocessing.pool import ThreadPool, Pool
 from multiprocessing import Process, Queue, cpu_count
+import pystache
+import numpy as np
+from loguru import logger
+
+from libs.raw_image import RawImage
+from libs.log_parser import DualMagLog
 from libs.rois import ROI
 
-from concurrent import futures
+
 
 roi_paths = ['low_mag_cam_rois','high_mag_cam_rois']
 video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
@@ -334,6 +334,27 @@ if __name__=="__main__":
 
             # Save the total number of ROIs processed
             total_rois.append(len(all_rois))
+
+            # Remove duplicates by searching within a frame number and detecting any ROIs that overlap and
+            # removing all of the overlapping ROIs but the largest one
+            if len(total_rois) > 0:
+                rois_in_frame = [total_rois[0]]
+                last_frame_number = total_rois[0].frame_number
+                for roi in total_rois:
+                    if roi.frame_number == last_frame_number:
+                        rois_in_frame.append(roi)
+                    else:
+                        # remove any duplicates
+                        for i, roi_1 in enumerate(rois_in_frame[:-1]):
+                            for roi_2 in rois_in_frame[i+1:]:
+                                if roi_1.is_duplicate(roi_2):
+                                    if roi_1.get_area() >= roi_2.get_area():
+                                        roi_2.delete_from_disk()
+                                    else:
+                                        roi_1.delete_from_disk()
+                        # clear the roi lists and update frame number
+                        rois_in_frame = []
+
 
             context = {}
             context['image_items'] = all_rois
