@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
-import cv2
 import numpy as np
 import datetime
 
 from math import pi
+from cv2 import cv2
 from loguru import logger
 from scipy import ndimage, spatial
 from skimage import color

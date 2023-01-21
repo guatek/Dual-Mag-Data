@@ -339,21 +339,28 @@ if __name__=="__main__":
             # removing all of the overlapping ROIs but the largest one
             if len(total_rois) > 0:
                 rois_in_frame = [total_rois[0]]
+                rois_to_delete = []
                 last_frame_number = total_rois[0].frame_number
                 for roi in total_rois:
                     if roi.frame_number == last_frame_number:
                         rois_in_frame.append(roi)
                     else:
-                        # remove any duplicates
+                        # create list of duplicates to delete
                         for i, roi_1 in enumerate(rois_in_frame[:-1]):
                             for roi_2 in rois_in_frame[i+1:]:
                                 if roi_1.is_duplicate(roi_2):
                                     if roi_1.get_area() >= roi_2.get_area():
-                                        roi_2.delete_from_disk()
+                                        if roi_2 not in rois_to_delete:
+                                            rois_to_delete.append(roi_2)
                                     else:
-                                        roi_1.delete_from_disk()
+                                        if roi_1 not in rois_to_delete:
+                                            rois_to_delete.append(roi_1)
+                        
                         # clear the roi lists and update frame number
+                        for roi in rois_to_delete:
+                            roi.delete_from_disk()
                         rois_in_frame = []
+                        rois_to_delete = []
 
 
             context = {}
