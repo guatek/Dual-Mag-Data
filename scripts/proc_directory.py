@@ -355,11 +355,14 @@ if __name__=="__main__":
                                     else:
                                         if roi_1 not in rois_to_delete:
                                             rois_to_delete.append(roi_1)
-                        
+
                         # clear the roi lists and update frame number
                         for roi in rois_to_delete:
                             roi.delete_from_disk()
-                        rois_in_frame = []
+                        
+                         # reset lists and frame number for next frame
+                        rois_in_frame = [roi]
+                        last_frame_number = roi.frame_number
                         rois_to_delete = []
 
 
@@ -387,3 +390,4 @@ if __name__=="__main__":
 
         pr.disable()
         pr.dump_stats("profile_result.txt")
+        

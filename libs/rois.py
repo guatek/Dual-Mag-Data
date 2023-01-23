@@ -230,7 +230,7 @@ class ROI:
         return output
 
     def is_duplicate(self, test_roi):
-        if bb_intersection_over_union(self, test_roi) > 0.2:
+        if bb_intersection_over_union(self, test_roi) > 0.0:
             return True
         else:
             return False
