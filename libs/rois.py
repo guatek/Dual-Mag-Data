@@ -4,7 +4,7 @@ import numpy as np
 import datetime
 
 from math import pi
-from cv2 import cv2
+import cv2
 from loguru import logger
 from scipy import ndimage, spatial
 from skimage import color
@@ -150,6 +150,32 @@ def bb_intersection_over_union(roiA, roiB):
 	# return the intersection over union value
 	return iou
 
+class ROIInfo:
+    """Extract roi info from filepath
+    """
+
+    def __init__(self, filepath):
+        # low_mag_cam-1656948837612122-11054092130728-110363-018-688-1406-28-24_rawcolor.jpeg
+        self.filepath = os.path.dirname(filepath)
+        self.filename = os.path.basename(filepath)
+        self.tokens = self.filename.split('-')
+        if len(self.tokens) != 9:
+            logger.warning(self.filename + ' does not match expected format, skipping...')
+            return
+        else:
+            self.camera = self.tokens[0]
+            self.timestamp = datetime.datetime.fromtimestamp(float(self.tokens[1])/1000000)
+            self.timestring = self.timestamp.isoformat()
+            # high_mag_cam-1649701840911317-21594687728-3-023-498-914-452-44_binary
+            self.frame_number = int(self.tokens[3])
+            self.left = int(self.tokens[5])
+            self.top = int(self.tokens[6])
+            self.width = int(self.tokens[7])
+            self.height = int(self.tokens[8].split('_')[0]) # remove extra cruft on the right end of last token
+
+    def get_area(self):
+        return self.width*self.height
+
 
 class ROI:
     """Region Of Interest handler for loading, converting and storing
@@ -176,7 +202,7 @@ class ROI:
             self.left = int(self.filename.split('-')[5])
             self.top = int(self.filename.split('-')[6])
             self.width = int(self.filename.split('-')[7])
-            self.height = int(self.filename.split('-')[8])
+            self.height = int(self.filename.split('-')[8].split('.')[0]) # remove extra cruft on the right end of last token
 
             self.output_path = output_path
             self.is_flipped = is_flipped
@@ -226,6 +252,7 @@ class ROI:
             output['fullHeight'] = self.img.shape[0]
             output['src'] = self.url + '.jpeg'
             output['thumbnail'] = self.url + '.jpeg'
+            #output['roi_info'] = ROIInfo(self.basepath)
         
         return output
 

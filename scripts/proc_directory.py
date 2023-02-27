@@ -15,9 +15,11 @@ import pystache
 import numpy as np
 from loguru import logger
 
-from libs.raw_image import RawImage
-from libs.log_parser import DualMagLog
-from libs.rois import ROI
+sys.path.append('../libs')
+
+from raw_image import RawImage
+from log_parser import DualMagLog
+from rois import ROI
 
 
 
@@ -25,6 +27,25 @@ roi_paths = ['low_mag_cam_rois','high_mag_cam_rois']
 video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
 
 output_path = ''
+
+def bb_intersection_over_union(roiA, roiB):
+	# determine the (x, y)-coordinates of the intersection rectangle
+	xA = max(roiA.left, roiB.left)
+	yA = max(roiA.top, roiB.top)
+	xB = min(roiA.left+roiA.width, roiB.left+roiB.width)
+	yB = min(roiA.top+roiA.height, roiB.top+roiB.height)
+	# compute the area of intersection rectangle
+	interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+	# compute the area of both the prediction and ground-truth
+	# rectangles
+	boxAArea = roiA.width * roiA.height
+	boxBArea = roiB.width * roiB.height
+	# compute the intersection over union by taking the intersection
+	# area and dividing it by the sum of prediction + ground-truth
+	# areas - the interesection area
+	iou = float(interArea) / float(boxAArea + boxBArea - interArea)
+	# return the intersection over union value
+	return iou
 
 def threaded_video_proc(raw_image):
     raw_image.export_as_tiff(flat_field=False)
@@ -96,10 +117,11 @@ def threaded_subdir_proc(subdir_pack):
     # Process then save
     for i in range(0,len(raw_rois)):
         raw_rois[i].process(save_to_disk=False)
+        all_rois.append(raw_rois[i])
 
-    for i in range(0,len(raw_rois)):
-        all_rois.append(raw_rois[i].get_item())
-        raw_rois[i].save_to_disk()
+    #for i in range(0,len(raw_rois)):
+    #    all_rois.append(raw_rois[i].get_item())
+    #    raw_rois[i].save_to_disk()
 
     # remove the extracted dir
     if extracted_path is not None and os.path.exists(extracted_path):
@@ -327,28 +349,27 @@ if __name__=="__main__":
                 all_subdirs = p.map(threaded_subdir_proc, subdir_packs)
 
             all_rois = []
+            all_rois_without_duplicates = []
             for subdir in all_subdirs:
                 all_rois += subdir
 
             logger.info('ROIs per second: ' + str(len(all_rois)/(time.time()-roi_per_sec_timer + 1)))
 
-            # Save the total number of ROIs processed
-            total_rois.append(len(all_rois))
-
             # Remove duplicates by searching within a frame number and detecting any ROIs that overlap and
             # removing all of the overlapping ROIs but the largest one
-            if len(total_rois) > 0:
-                rois_in_frame = [total_rois[0]]
+            if len(all_rois) > 0:
+                rois_in_frame = [all_rois[0]]
                 rois_to_delete = []
-                last_frame_number = total_rois[0].frame_number
-                for roi in total_rois:
+                last_frame_number = all_rois[0].frame_number
+                for roi in all_rois:
                     if roi.frame_number == last_frame_number:
                         rois_in_frame.append(roi)
                     else:
                         # create list of duplicates to delete
                         for i, roi_1 in enumerate(rois_in_frame[:-1]):
                             for roi_2 in rois_in_frame[i+1:]:
-                                if roi_1.is_duplicate(roi_2):
+                                iou = bb_intersection_over_union(roi_1, roi_2)
+                                if iou > 0.0:
                                     if roi_1.get_area() >= roi_2.get_area():
                                         if roi_2 not in rois_to_delete:
                                             rois_to_delete.append(roi_2)
@@ -356,18 +377,25 @@ if __name__=="__main__":
                                         if roi_1 not in rois_to_delete:
                                             rois_to_delete.append(roi_1)
 
-                        # clear the roi lists and update frame number
-                        for roi in rois_to_delete:
-                            roi.delete_from_disk()
+                        # save and append only those rois not in the list to delete
+                        for roi_s in rois_in_frame:
+                            if roi_s in rois_to_delete:
+                                logger.warning('Removing duplicate ' + roi.filename)
+                            else:
+                                all_rois_without_duplicates.append(roi_s.get_item())
+                                roi_s.save_to_disk()
                         
                          # reset lists and frame number for next frame
                         rois_in_frame = [roi]
                         last_frame_number = roi.frame_number
                         rois_to_delete = []
 
+            # Save the total number of ROIs processed
+            total_rois.append(len(all_rois_without_duplicates))
+
 
             context = {}
-            context['image_items'] = all_rois
+            context['image_items'] = all_rois_without_duplicates
             context['database_name'] = roi_path
             render_template('roi-grid.stache', context, output_dir)
 
