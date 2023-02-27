@@ -45,7 +45,7 @@ class ROIInfo:
             self.left = int(self.tokens[5])
             self.top = int(self.tokens[6])
             self.width = int(self.tokens[7])
-            self.height = int(self.tokens[8].split('_')[0]) # make have extra cruft on the right end of last token
+            self.height = int(self.tokens[8].split('_')[0]) # remove extra cruft on the right end of last token
 
     def get_area(self):
         return self.width*self.height
