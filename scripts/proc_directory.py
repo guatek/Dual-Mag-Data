@@ -28,6 +28,22 @@ video_paths = ['low_mag_cam_video', 'high_mag_cam_video']
 
 output_path = ''
 
+def delete_from_disk(roi_item):
+
+    try:
+        if os.path.exists(os.path.join(roi_item['output_path'],roi_item['image_id']+".jpeg")):
+            os.remove(os.path.join(roi_item['output_path'],roi_item['image_id']+".jpeg"))
+        if os.path.exists(os.path.join(roi_item['output_path'],roi_item['image_id']+".png")):
+            os.remove(os.path.join(roi_item['output_path'],roi_item['image_id']+".png"))
+        if os.path.exists(os.path.join(roi_item['output_path'],roi_item['image_id']+"_binary.png")):
+            os.remove(os.path.join(roi_item['output_path'],roi_item['image_id']+"_binary.png"))
+        if os.path.exists(os.path.join(roi_item['output_path'],roi_item['image_id']+"_rawcolor.jpeg")):
+            os.remove(os.path.join(roi_item['output_path'],roi_item['image_id']+"_rawcolor.jpeg"))
+        if os.path.exists(os.path.join(roi_item['output_path'],roi_item['image_id']+"_rawcolor.png")):
+            os.remove(os.path.join(roi_item['output_path'],roi_item['image_id']+"_rawcolor.png"))
+    except IOError as e:
+        logger.error(e)
+
 def bb_intersection_over_union(roiA, roiB):
 	# determine the (x, y)-coordinates of the intersection rectangle
 	xA = max(roiA.left, roiB.left)
@@ -115,13 +131,14 @@ def threaded_subdir_proc(subdir_pack):
     all_rois = []
     
     # Process then save
+    #for i in range(0,len(raw_rois)):
+    #    raw_rois[i].process(save_to_disk=False)
+    #    all_rois.append(raw_rois[i])
+
     for i in range(0,len(raw_rois)):
         raw_rois[i].process(save_to_disk=False)
-        all_rois.append(raw_rois[i])
-
-    #for i in range(0,len(raw_rois)):
-    #    all_rois.append(raw_rois[i].get_item())
-    #    raw_rois[i].save_to_disk()
+        all_rois.append(raw_rois[i].get_item())
+        raw_rois[i].save_to_disk()
 
     # remove the extracted dir
     if extracted_path is not None and os.path.exists(extracted_path):
@@ -360,17 +377,17 @@ if __name__=="__main__":
             if len(all_rois) > 0:
                 rois_in_frame = [all_rois[0]]
                 rois_to_delete = []
-                last_frame_number = all_rois[0].frame_number
+                last_frame_number = all_rois[0]['roi_info'].frame_number
                 for roi in all_rois:
-                    if roi.frame_number == last_frame_number:
+                    if roi['roi_info'].frame_number == last_frame_number:
                         rois_in_frame.append(roi)
                     else:
                         # create list of duplicates to delete
                         for i, roi_1 in enumerate(rois_in_frame[:-1]):
                             for roi_2 in rois_in_frame[i+1:]:
-                                iou = bb_intersection_over_union(roi_1, roi_2)
+                                iou = bb_intersection_over_union(roi_1['roi_info'], roi_2['roi_info'])
                                 if iou > 0.0:
-                                    if roi_1.get_area() >= roi_2.get_area():
+                                    if roi_1['roi_info'].get_area() >= roi_2['roi_info'].get_area():
                                         if roi_2 not in rois_to_delete:
                                             rois_to_delete.append(roi_2)
                                     else:
@@ -380,14 +397,15 @@ if __name__=="__main__":
                         # save and append only those rois not in the list to delete
                         for roi_s in rois_in_frame:
                             if roi_s in rois_to_delete:
-                                logger.warning('Removing duplicate ' + roi.filename)
+                                logger.warning('Removing duplicate ' + roi_s['image_id'])
+                                delete_from_disk(roi_s)
+
                             else:
-                                all_rois_without_duplicates.append(roi_s.get_item())
-                                roi_s.save_to_disk()
+                                all_rois_without_duplicates.append(roi_s)
                         
                          # reset lists and frame number for next frame
                         rois_in_frame = [roi]
-                        last_frame_number = roi.frame_number
+                        last_frame_number = roi['roi_info'].frame_number
                         rois_to_delete = []
 
             # Save the total number of ROIs processed

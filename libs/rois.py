@@ -171,10 +171,11 @@ class ROIInfo:
             self.left = int(self.tokens[5])
             self.top = int(self.tokens[6])
             self.width = int(self.tokens[7])
-            self.height = int(self.tokens[8].split('_')[0]) # remove extra cruft on the right end of last token
+            self.height = int(self.tokens[8].split('.')[0]) # remove extra cruft on the right end of last token
 
     def get_area(self):
         return self.width*self.height
+
 
 
 class ROI:
@@ -252,7 +253,8 @@ class ROI:
             output['fullHeight'] = self.img.shape[0]
             output['src'] = self.url + '.jpeg'
             output['thumbnail'] = self.url + '.jpeg'
-            #output['roi_info'] = ROIInfo(self.basepath)
+            output['roi_info'] = ROIInfo(os.path.join(self.basepath, self.filename))
+            output['output_path'] = self.output_path
         
         return output
 
